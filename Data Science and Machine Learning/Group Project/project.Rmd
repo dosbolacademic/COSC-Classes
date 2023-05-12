@@ -1,0 +1,243 @@
+---
+title: "Income Prediction"
+subtitle: "Can we predict someone's earnings based on demographic information?"
+author: "Adil Iqbal, Angelita Krepel, Dosbol Aliev, Udochukwu Amaefule, Malik Taylor"
+date: "11/22/2022"
+output: word_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+\newpage
+### Introduction
+
+This data was extracted from the U.S. Census in 1994. Our goal will be to predict whether an individual earns more than $50,000 USD per year (`class`) based on data collected by the census alone. Examples of data collected by the census include education level (`education`), marital status (`marital.status`), and country of origin (`native.country`) among others. All features are either categorical or continuous integer values.
+
+#### Features
+age: continuous.
+workclass: Private, Self-emp-not-inc, Self-emp-inc, Federal-gov, Local-gov, State-gov, Without-pay, Never-worked.
+fnlwgt: continuous.
+education: Bachelors, Some-college, 11th, HS-grad, Prof-school, Assoc-acdm, Assoc-voc, 9th, 7th-8th, 12th, Masters, 1st-4th, 10th, Doctorate, 5th-6th, Preschool.
+education.num: continuous.
+marital.status: Married-civ-spouse, Divorced, Never-married, Separated, Widowed, Married-spouse-absent, Married-AF-spouse.
+occupation: Tech-support, Craft-repair, Other-service, Sales, Exec-managerial, Prof-specialty, Handl sdasdasders-cleaners, Machine-op-inspct, Adm-clerical, Farming-fishing, Transport-moving, Priv-house-serv, Protective-serv, Armed-Forces.
+relationship: Wife, Own-child, Husband, Not-in-family, Other-relative, Unmarried.
+race: White, Asian-Pac-Islander, Amer-Indian-Eskimo, Other, Black.
+sex: Female, Male.
+capital.gain: continuous.
+capital.loss: continuous.
+hours.per.week: continuous.
+native.country: United-States, Cambodia, England, Puerto-Rico, Canada, Germany, Outlying-US(Guam-USVI-etc), India, Japan, Greece, South, China, Cuba, Iran, Honduras, Philippines, Italy, Poland, Jamaica, Vietnam, Mexico, Portugal, Ireland, France, Dominican-Republic, Laos, Ecuador, Taiwan, Haiti, Columbia, Hungary, Guatemala, Nicaragua, Scotland, Thailand, Yugoslavia, El-Salvador, Trinadad&Tobago, Peru, Hong, Holand-Netherlands.
+
+#### Response Variable
+class: >50K, <=50K.
+
+#### Question
+Can we predict if an individual will make 50K or more based on a list of predictors?
+
+```{r}
+#Dosbol
+set.seed(1)
+data = read.csv("adult.csv", stringsAsFactors = T)
+adult = read.csv("adult.csv")
+summary(data)
+```
+
+#### Removing missing values. 
+In this data set, missing values are marked with a "?" character. Since all the missing data occurs in our categorical variables, it does not make sense to replace them with a median or a mean. So we are opting to remove them entirely for our analysis. After removing the observations with missing variables, we are left with 45,222 observations.
+```{r}
+#Adil
+cols_missing_vals <- c("occupation", "workclass", "native.country")
+for (column in cols_missing_vals) {
+  data <- data[!grepl("\\?", data[, column]),]
+}
+summary(data)
+```
+
+#### Set categorical features to dummy variables
+In this data, many categorical variables are needed to be converted to numeric and make a Dummy variable for the response variable.
+```{r, results='hide'}
+#Dosbol
+### 1. Class  (<=50K or 50K>)
+data$class = ifelse(data$class==" <=50K",0,1) # Our Response Variable. I made 0 for below 50K and 1 for above 50K
+data$class = as.factor(data$class)
+### 8. Native Country
+data$native.country = ifelse(data$native.country==" United-States",0,1)
+# So most people are from the United States, so I assigned them to 0 and other countries to 1
+data$native.country = as.factor(data$native.country)
+# Omit NA rows
+data = na.omit(data)
+```
+
+#### Split data into training and testing set
+Below, we are now splitting the data into training and testing sets. With the training set containing 80% of the data and the testing set containing 20%. 
+```{r}
+#Adil
+sample <- sample(c(TRUE, FALSE), nrow(data), replace=TRUE, prob=c(0.8,0.2))
+train  <- data[sample, ]
+test   <- data[!sample, ]
+
+print(nrow(train))
+print(nrow(test))
+```
+
+####Checking for correlations
+```{r}
+#Angelita
+#checking correlations
+pairs(adult[sapply(adult, is.numeric)])
+cor(adult[sapply(adult, is.numeric)])
+```
+From the output it doesn't appear that from the original model there is much correlation between the data, but after making the occupation dummy values there may be some correlation between those.
+
+####Methods
+Below, we will run our methodology on the pair of train/test set generated above. But will run our methods 10 times and deliver the average misclassification errors at the end of the experiment.
+
+#### Model 1: Logistic regression
+We will be using logistic regression, because the response variable is a categorical variable that takes 1 if their salary is >=50K. The advantages of using logistic regression is it is easy to implement and interpret, makes no assumptions about classes within the predictors, provides a measure of which predictors are most important in the predictions, and is less likely to overfit. The disadvantages of using logistic regression is non-linear problems cannot be used with this, requires little to no multicollinearity between independent variables. Lastly, with high dimensional datasets you can overfit/lead to less accurate results. The model formula for logistic regression is: $$\frac{e^{b_0 + b_1 x}}{1+e^{b_0 + b_1 x}}$$
+
+```{r, warning=FALSE}
+#Angelita
+lr.glm = glm(class ~., data = train, family = "binomial")
+glm.pred = predict.glm(lr.glm, test, type = "response")
+yHat = glm.pred > 0.5
+x1 <- table(test$class,yHat)
+```
+```{r}
+log_reg_misclass <- function(table) {
+  return((table[1,2]+table[2,1])/(table[1,1]+table[1,2]+table[2,1]+table[2,2]))  
+} 
+x2 <- log_reg_misclass(x1)
+x2
+```
+The test error rate is kind of large sitting at about 35%. This means our model only predicted about 65% of the data correctly. Seeing this error rate, there may be some predictors that are less important/not needed in predicting the response, therefore there could be some predictors we can leave out of the model. So, the next step is to look at the summary to see which of those varibles are significant.  
+
+```{r, results='hide'}
+#Angelita
+summary(lr.glm)
+```
+(We are not going to be showing the summary here, run the base code to see it.) Based on the summary of the logistic regression model we can see that not all the variables are important in predicting, so we will try again but this time with the variables deemed important.
+
+```{r, results='hide'}
+#Angelita 
+lr.glm2 = glm(class ~  age+education+occupation+relationship+sex+capital.gain+capital.loss+hours.per.week, data = train, family = "binomial")
+do_logistic_regression <- function(train, test) {
+  lr.glm2 = glm(class ~  age+education+occupation+relationship+sex+capital.gain+capital.loss+hours.per.week, data = train, family = "binomial")
+  pred = predict.glm(lr.glm2, test, type = "response")
+  yHat2 = pred > 0.5
+  return(table(test$class,yHat2))
+}
+x2 <- do_logistic_regression(train, test)
+summary(lr.glm2)
+```
+```{r}
+log_reg_misclass(x2)
+```
+The results when removing the less important variables come to be about the same as when leaving them in there. 
+
+#### Model 2: Decision Tree Model
+We will be using decision tree as our second model, because the dimensions of our dataset are pretty large and this should be able to manage it better than the logistic regression did. We are also using it, because our goal is to classify someone 1 if their salary is >=50K or 0 if below 50K. Some advantages of decision trees are: it is easy to understand and interpret, it takes less data preparation, is a non-parametric algorithm therefore needs little to no assumptions for classification, and you can use it for non-linear problems. Some disadvantages inlcude that it can be prone to overfitting the data, it cannot handle too many features so you so you must do feature reduction, and lastly using this model can produce high variances and changes to the data can have a large affect in the predictions.  
+
+Here we create the tree model $y = response ~ x1+x2+x3+...$, where response variable is "class" and xi to xn are the variables used in prediction, and plot it. 
+```{r}
+#Udochukwu Amaefule
+library(tree)
+plot.new()
+do_decision_tree = function(train) {
+  class.tree = tree(class ~ ., data=train)
+  return(class.tree)
+}
+baseTree = do_decision_tree(train)
+summary(baseTree)
+plot(baseTree)
+text(baseTree)
+```
+As seen above, the tree model makes use of only 3 of the several variables available, "relationship", "capital.gain", "education". The model has 5 terminal nodes and a misclassification error rate of 0.3627 or 36.3%
+
+####Pruning/Cross Validating tree for optimization
+Usually after growing single decision tree it has many leaf/terminal nodes, some of which might be important, whereas others are redundant and unnecessary. To further improve our results and accuracy of prediction, we perform cross validation on the tree to find out the best number of leaf/terminal nodes. Once we have obtained this, we can then proceed to prune the tree to obtain our final model.
+As shown above, the original tree has 5 terminal nodes. On the right half of the tree, most of those nodes result in the same decision, thus removing them should not change the error rate of the model. By cross validation we find that the best number of terminal nodes is 3, so our final tree after pruning will have 3 terminal nodes.
+
+#### Cross Validation of tree
+```{r}
+find_best_pruning_param = function(class_cv) {
+  mn = Inf; 
+  mn_idx = -1
+  for (x in length(class_cv$dev):1) { 
+    if (class_cv$dev[x] < mn) { mn = class_cv$dev[x]; mn_idx = x }
+  }
+  return(class_cv$size[mn_idx])
+}
+```
+```{r}
+#Udochukwu Amaefule
+cv_decision_tree = function(baseTree) {
+  class.cv = cv.tree(baseTree,FUN = prune.misclass)
+  min_index = find_best_pruning_param(class.cv)
+  plot(class.cv$size,class.cv$dev,type = "b")
+  class.prune = prune.misclass(baseTree,best = min_index)
+  summary(class.prune)
+  plot(class.prune)
+  text(class.prune)
+  x <- summary(baseTree)
+  return(x$misclass[1]/x$misclass[2])
+}
+errorRate = cv_decision_tree(baseTree)
+errorRate
+```
+After pruning the tree model remains with a misclassification rate of 0.3627 or 36.3% as expected.
+
+#### Average of 10 Trials
+Now that we have built our models, we will evaluate them over 10 trials to determine the average misclassification rate. 
+```{r}
+# Redefined to avoid plots.
+cv_decision_tree = function(baseTree) {
+  class.cv = cv.tree(baseTree,FUN = prune.misclass)
+  min_index = find_best_pruning_param(class.cv)
+  class.prune = prune.misclass(baseTree,best = min_index)
+  x <- summary(baseTree)
+  return(x$misclass[1]/x$misclass[2])
+}
+```
+```{r, results='hide'}
+iterations = 10
+lr_err_total = 0
+dtree_err_total = 0
+for (x in 1:iterations) {
+  set.seed(x)
+  sample <- sample(c(TRUE, FALSE), nrow(data), replace=TRUE, prob=c(0.8,0.2))
+  train  <- data[sample, ]
+  test   <- data[!sample, ]
+  table = do_logistic_regression(train, test)
+  lr_err = log_reg_misclass(table)
+  lr_err_total = lr_err_total + lr_err
+  baseTree = do_decision_tree(train)
+  dtree_err = cv_decision_tree(baseTree)
+  dtree_err_total = dtree_err_total + dtree_err
+  print(lr_err)
+  print(dtree_err)
+  print('--')
+}
+print('--- AVERAGE ERR ---')
+print(lr_err_total / iterations)
+print(dtree_err_total / iterations)
+```
+We can see from the above experiment, that the average misclassification rate for our linear regression model over 10 trials is 35.051% and our average misclassification rate for our decision tree is 36.187%
+
+
+#### Best Model
+Based on our models and their respective test error rates, the logistic regression model performed better showing to be the more accurate model in predicting whether or not an individual earns more than $50,000 USD per year. With a misclassification error rate of about 35.051% for the logistic regression model and 36.187% for the decision tree model. It is clear to see that logistic regression model does in fact perform slightly more accurate than the decision tree model. For the decision tree model, it is important to note that this test error rate comes after applying the pruning method to our model.
+
+#### Conclusion 
+When using the logistic regression model we were able to achieve the smallest misclassificaiton error rate, and therefore is the best approach to our problem. Our initial error rate was 34.73%, after determining which predictors were not needed in our model we were able to improve our test error rate, however the improvement made only a slight difference, less than a 1%. The predictors found to be important to our model are the following: age, education, occupation, relationship, sex, capital.gain, capital.loss, hours.per.week. We would like to predict whether an individual will make $50,000 based on these important predictors. We do believe that these variables are significant in our prediction as those with a higher level of education such as a bachelors and higher, do in fact on average earn a higher salary then those with less education. One’s occupation also has a direct affect on one’s salary as well and generally higher paying occupations can be obtained with a higher level of education. Individuals that work more hours are often times compensated for their hours worked, through hourly pay or even overtime based compensation which has an effect on how much their yearly income is.
+
+#### Bibliography
+Satyam, Kumar. “Decision Tree in R Programming.” GeeksforGeeks, 3 Dec. 2021, https://www.geeksforgeeks.org/decision-tree-in-r-programming/.
+
+“Home.” OARC Stats, https://stats.oarc.ucla.edu/r/dae/logit-regression/.
+Mishra, Rishu. “Cross-Validation in R Programming.” GeeksforGeeks, 15 Sept. 2021, https://www.geeksforgeeks.org/cross-validation-in-r-programming/.
+
+
