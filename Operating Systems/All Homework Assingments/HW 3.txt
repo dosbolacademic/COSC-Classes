@@ -1,0 +1,353 @@
+#include <fstream>            // header for file input/output
+#include <iostream>           // header for standard input/output
+#include <string>             // header for string manipulation
+#include <unordered_map>      // header for unordered map data structure
+#include <vector>             // header for vector container
+#include <pthread.h>          // header for POSIX threads
+
+// Define a struct for the nodes of the Huffman tree
+struct Node {
+  int frequency;             // frequency of the character
+  Node * left;               // pointer to the left child node
+  Node * right;              // pointer to the right child node
+  char ch;                   // character associated with this node
+
+  // Constructor for leaf nodes
+  Node(int f, char c): frequency(f), ch(c), left(nullptr), right(nullptr) {}
+
+  // Constructor for non-leaf nodes
+  Node(int f, Node * l, Node * r): frequency(f), ch('\0'), left(l), right(r) {}
+};
+
+
+// Define a comparator struct that will be used to compare nodes when building the Huffman tree
+struct comparator {
+  bool operator()(std::pair<Node*, int> left, std::pair<Node*, int> right) {
+
+    // Compare the frequencies and characters of the nodes
+    if (left.first->frequency == right.first->frequency && left.first->ch == right.first->ch) {
+      // If they are equal, compare their positions in the input sequence
+      return left.second < right.second;
+    } else if (left.first->frequency == right.first->frequency) {
+      // If the frequencies are equal but the characters are different, compare the characters
+      return left.first->ch > right.first->ch;
+    } else {
+      // Otherwise, compare the frequencies
+      return left.first->frequency > right.first->frequency;
+    }
+  }
+};
+
+
+
+// Add a new node to the sorted vector in descending order of frequency and character
+void add_sorted(std::vector<Node*>& sorted, Node* node) {
+
+  // Keep track of whether the node has been inserted
+  bool inserted = false;
+
+  // Iterate over the vector and insert the node in the correct position
+  std::vector<Node*>::iterator it = sorted.begin();
+  while (it != sorted.end()) {
+    Node* curr = *it;
+
+    // If the current node has a lower frequency than the new node, or if the frequencies are equal but the current node's character is less than the new node's character, insert the new node before the current node
+    if (curr->frequency < node->frequency || (curr->frequency == node->frequency && curr->ch < node->ch)) {
+      sorted.insert(it, node);
+      inserted = true;
+      break;
+    } else {
+      // Otherwise, move on to the next node
+      it++;
+    }
+  }
+
+  // If the node has not been inserted yet, append it to the end of the vector
+  if (!inserted) {
+    sorted.push_back(node);
+  }
+}
+
+
+// Create a Huffman tree from the given character frequencies
+Node * create_tree(const std::vector<std::pair<char, int>>& freqs) {
+  
+  // Create an empty vector to hold the nodes
+  std::vector<Node*> q;
+
+  // Iterate over the frequency pairs and create a new node for each pair, adding it to the sorted vector using the add_sorted function
+  for (auto elem : freqs) {
+    add_sorted(q, new Node(elem.second, elem.first));
+  }
+
+  // While there are at least two nodes in the vector, remove the two nodes with the lowest frequency and create a new node with them as children. Add the new node to the vector using the add_sorted function.
+  while (q.size() != 1) {
+    Node * left = q[q.size()-1];
+    q.pop_back();
+    Node * right = q[q.size()-1];
+    q.pop_back();
+
+    int sum = left->frequency + right->frequency;
+    add_sorted(q, new Node(sum, left, right));
+  }
+
+  // The final remaining node in the vector is the root of the Huffman tree, so return it
+  Node * root = q[0];
+  return root;
+}
+
+
+//This function takes in a Node pointer node, a reference to a std::string current_code, and a reference to a 
+//std::vector of pairs of std::string and char res.
+
+void _extract_helper(Node * node, std::string & current_code, std::vector < std::pair < std::string, char >> & res) {
+    //If the current node is a leaf node (i.e., it represents a character), 
+    //then the binary code and the corresponding character are stored in the res vector as a pair using 
+    //the emplace_back function, and the function returns.
+    
+  if (node -> ch != '\0') {
+    res.emplace_back(current_code, node -> ch);
+    return;
+  }
+  //If the current node is not a leaf node, then we append "0" to the current_code string, 
+  //and recursively call _extract_helper on the left child of the current node. After the recursive call, 
+  //we remove the last character (which is "0") from the current_code string using the pop_back function.
+  current_code.push_back('0');
+  _extract_helper(node -> left, current_code, res);
+  current_code.pop_back();
+  //Then, we append "1" to the current_code string, and recursively call _extract_helper on the 
+  //right child of the current node. After the recursive call, we remove the last character (which is "1") 
+  //from the current_code string using the pop_back function.
+  current_code.push_back('1');
+  _extract_helper(node -> right, current_code, res);
+  current_code.pop_back();
+}
+
+
+//This function takes in a Node pointer root representing the root of a Huffman tree and returns 
+//a std::vector of pairs of std::string and char.
+std::vector < std::pair < std::string, char >> extract_codes(Node * root) {
+    //We create a std::vector of pairs of std::string and char called res to hold the binary codes and their 
+    //corresponding characters, and an empty std::string called c to hold the binary code for the current 
+    //character during traversal. We then call the _extract_helper function with the root, c, and res parameters 
+    //to traverse the Huffman tree and generate the binary codes for each character. Finally, we return the res vector 
+    //containing the binary codes and their corresponding characters.
+  std::vector < std::pair < std::string, char >> res;
+  std::string c;
+  _extract_helper(root, c, res);
+  return res;
+}
+
+struct Pthread_args_3 {
+  Pthread_args_3(Node * r, const std::vector < std::pair < std::string, std::vector < int >>>& data, std::string & place, pthread_mutex_t *mutex, 
+pthread_cond_t * condVar, int i, int *t):
+      root(r), data(data), placeholder(place), mt(mutex), cond(condVar), index(i), turn(t) {}
+  Node * root;
+  std::vector < std::pair < std::string, std::vector < int >>> data;
+  std::string & placeholder;
+  pthread_mutex_t * mt;
+	pthread_cond_t * cond;
+  int index;
+	int* turn;
+};
+
+
+//Define the function find_char_from_code which takes in a pointer to the root node of a Huffman tree and a string code
+std::pair<char, int> find_char_from_code(Node * root, std::string code) {
+    
+    //Traverse the Huffman tree from the root node to the leaf node corresponding to the given binary code.
+    //For each character in the binary code:
+        //If the character is '0', move to the left child of the current node.
+        //If the character is '1', move to the right child of the current node.
+  for (auto bit: code) {
+    if (bit == '0') {
+      root = root -> left;
+      continue;
+    }
+    root = root -> right;
+  }
+  //Once the traversal is complete, obtain the character stored at the leaf node corresponding to the given binary code.
+    //Return a pair consisting of the character and its frequency in the Huffman tree.
+  char elem = root -> ch;
+  return {elem, root->frequency};
+}
+
+void * huffman_helper_3(void * args) {
+  Pthread_args_3 * a = static_cast < Pthread_args_3 * > (args);
+  // Cast the void pointer argument to a Pthread_args_3 pointer
+  int local = a->index;
+  // Get the index of the current thread
+  Node * root = a->root;
+  // Get the root node of the Huffman tree
+  std::vector< std::pair < std::string, std::vector < int >>> data = a->data;
+  // Get the vector of codes and indices of the characters
+  std::string & result_placeholder = a->placeholder;
+  // Get the reference to the placeholder string
+  pthread_mutex_t * mt = a->mt;
+  // Get the mutex pointer
+  pthread_cond_t *cond = a->cond;
+  // Get the condition variable pointer
+  pthread_mutex_unlock(mt);
+  // Unlock the mutex
+  pthread_mutex_lock(mt);
+  // Lock the mutex
+  while (local != *(a->turn)) {
+    pthread_cond_wait(cond, mt);
+    // Wait on the condition variable until it's the thread's turn
+  }
+  pthread_mutex_unlock(mt);
+  // Unlock the mutex
+  auto elem = find_char_from_code(root, data[local].first);
+  // Find the character and frequency associated with the current code
+  std::cout << "Symbol: " << elem.first << ", Frequency: " << elem.second << ", Code: " << data[local].first << std::endl;
+  // Print the character, frequency, and code to stdout
+  pthread_mutex_lock(mt);
+  // Lock the mutex
+  for (auto p: data[local].second) {
+    result_placeholder[p] = elem.first;
+    // Update the placeholder string with the current character
+  }
+  (*(a->turn))++;
+  // Increment the turn counter
+  pthread_cond_broadcast(cond);
+  // Signal all waiting threads
+  pthread_mutex_unlock(mt);
+  // Unlock the mutex
+  return nullptr;
+}
+
+
+void multithread_solve(Node * root,
+    const std::vector < std::pair < std::string, std::vector < int >>> & data, std::string & placeholder) {
+        //A mutex is initialized to use as a binary semaphore to control thread synchronization.
+  pthread_mutex_t bsem;
+	pthread_mutex_init(&bsem, NULL);
+	//A condition variable is also initialized to help with thread synchronization.
+	static pthread_cond_t waitTurn;
+	pthread_cond_init(&waitTurn, NULL);
+	//A vector of pthreads is created to store the threads that will be created.
+  std::vector < pthread_t > threads(data.size());
+  //A variable turn is initialized to 0. turn will be used to keep track of which thread is allowed to execute next
+	int turn = 0;
+	// A Pthread_args_3 struct is initialized with the Huffman tree root node, data,
+	//placeholder, the mutex, condition variable, the index of the current thread, and turn.
+	Pthread_args_3 arg(root, data, placeholder, &bsem, &waitTurn, 0, &turn);
+	//A loop is started to create threads for each code/index pair.
+  for (int i = 0; i < data.size(); ++i) {
+      //The binary semaphore is locked to control thread synchronization.
+		pthread_mutex_lock(&bsem);
+		//The index of the current thread is updated in arg.
+    arg.index = i;
+    //A new thread is created and the huffman_helper_3 function is passed as the function to be executed in the new thread. 
+    //The arg struct is cast as a void* and passed as an argument to the new thread.
+		pthread_create( & threads[i], nullptr, huffman_helper_3, static_cast < void * > (&arg));
+  }
+
+  ///join the threads and exit
+  //Another loop is started to join the threads that were created. This is necessary to ensure all threads complete before the function returns.
+  for (int i = 0; i < threads.size(); ++i) {
+    pthread_join(threads[i], nullptr);
+    //The loop then repeats to create threads for the remaining code/index pairs.
+  }
+  //Finally, the binary semaphore and condition variable are destroyed.
+	pthread_mutex_destroy(&bsem);
+	pthread_cond_destroy(&waitTurn);
+}
+
+// This is the main function of the program
+int main() {
+  char ch;
+  int freq;
+  int total_count = 0;
+  int n;
+
+  // Vector of pairs to store characters and their frequencies
+  std::vector < std::pair < char, int >> freqs;
+
+  // Unordered map to store the character for a given frequency
+  std::unordered_map < int, char > freq2char;
+
+  // Unordered map to store the frequency for a given character
+  std::unordered_map < char, int > char2freq;
+
+  // Vector to store the sequence of characters
+  std::vector < char > sequence;
+
+  // String variable to store each line read from standard input
+  std::string line;
+
+  // Read the first integer value from standard input
+  std::cin >> n;
+
+  // Read the remaining newline character after the first integer value
+  std::getline(std::cin, line);
+
+  // Loop over the input lines to get the character frequencies
+  for (int i = 0; i < n; ++i) {
+    std::getline(std::cin, line);
+    // Get the first character in the line
+    char ch = line[0];
+
+    // Get the frequency value from the line after the first two characters
+    int freq = std::stoi(line.substr(2));
+
+    // Add the character and its frequency to the vectors and maps
+    freqs.emplace_back(ch, freq);
+    sequence.emplace_back(ch);
+    freq2char[freq] = ch;
+    char2freq[ch] = freq;
+
+    // Update the total count of characters
+    total_count += freq;
+  }
+
+  // Create the Huffman tree from the character frequencies
+  Node * root = create_tree(freqs);
+
+  // Extract the Huffman codes for each character in the tree
+  auto codes = extract_codes(root);
+
+  // Unordered map to store the character code, frequency, and code string for each character
+  std::unordered_map < char, std::pair < int, std::string >> codes_output;
+
+  // Loop over the codes and store the output for each character in the unordered map
+  for (auto & c: codes) {
+    codes_output[c.second] = std::make_pair(char2freq[c.second], c.first);
+  }
+
+  // Create a string variable to store the uncompressed message
+  std::string res(total_count, ' ');
+
+  // Vector of pairs to store the Huffman code and the positions of the corresponding characters in the compressed message
+  std::vector < std::pair < std::string, std::vector < int >>> comp_data;
+
+  // Loop over the input lines to get the compressed message data
+  for (int i = 0; i < n; ++i) {
+    std::string code;
+    // Read the Huffman code from standard input
+    std::cin >> code;
+
+    // Find the character corresponding to the Huffman code in the Huffman tree
+    char c = find_char_from_code(root, code).first;
+
+    // Create a vector to store the positions of the corresponding characters in the compressed message
+    std::vector < int > positions;
+    for (int j = 0; j < char2freq[c]; ++j) {
+      int x;
+
+      // Read the position of the corresponding character from standard input
+      std::cin >> x;
+
+      // Add the position to the vector
+      positions.push_back(x);
+    }
+
+    // Add the Huffman code and the positions to the vector of compressed message data
+    comp_data.emplace_back(code, positions);
+  }
+  multithread_solve(root, comp_data, res);
+
+  std::cout << "Original message: " << res << std::endl;
+  return 0;
+
+}

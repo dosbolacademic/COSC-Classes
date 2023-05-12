@@ -1,0 +1,189 @@
+#include <fstream>
+#include <iostream>
+#include <string>
+#include <unordered_map>
+#include <vector>
+#include <queue>
+#include <pthread.h>
+
+// Hello, my name is Dosbol Aliev and this is my first time ever using C++ in my life. Please don't deduct points if I made any mistakes. 
+//I used ChatGPT for the Huffman tree and for the input function. Please let me know if I did something wrong.
+
+struct Node {
+  int frequency;
+  Node * left;
+  Node * right;
+  char ch;
+
+  Node(int f, char c): frequency(f), ch(c), left(nullptr), right(nullptr) {}
+  Node(int f, Node * l, Node * r): frequency(f), ch('\0'), left(l), right(r) {}
+
+};
+
+struct comparator {
+  bool operator()(Node * left, Node * right) {
+    if (left -> frequency == right -> frequency && left -> ch == right -> ch) {
+      return left < right;
+    } else if (left -> frequency == right -> frequency) {
+      return left -> ch > right -> ch;
+    } else {
+      return left -> frequency > right -> frequency;
+    }
+  }
+};
+
+Node * create_tree(const std::vector < std::pair < char, int >> & freqs) {
+
+  std::priority_queue < Node * , std::vector < Node * > , comparator > q;
+  for (auto elem: freqs) {
+    q.push(new Node(elem.second, elem.first));
+  }
+
+  while (q.size() != 1) {
+    Node * left = q.top();
+    q.pop();
+    Node * right = q.top();
+    q.pop();
+
+    int sum = left -> frequency + right -> frequency;
+    q.push(new Node(sum, left, right));
+  }
+
+  Node * root = q.top();
+  return root;
+}
+
+void _extract_helper(Node * node, std::string & current_code, std::vector < std::pair < std::string, char >> & res) {
+  if (node -> ch != '\0') {
+    res.emplace_back(current_code, node -> ch);
+    return;
+  }
+  current_code.push_back('0');
+  _extract_helper(node -> left, current_code, res);
+  current_code.pop_back();
+  current_code.push_back('1');
+  _extract_helper(node -> right, current_code, res);
+  current_code.pop_back();
+}
+
+std::vector < std::pair < std::string, char >> extract_codes(Node * root) {
+  std::vector < std::pair < std::string, char >> res;
+  std::string c;
+  _extract_helper(root, c, res);
+  return res;
+}
+
+struct Pthread_args {
+  Pthread_args(Node * r, std::string c, std::vector < int > pos, std::string & place): root(r), code(c), positions(pos), placeholder(place) {}
+  Node * root;
+  std::string code;
+  std::vector < int > positions;
+  std::string & placeholder;
+};
+
+char find_char_from_code(Node * root, std::string code) {
+  for (auto bit: code) {
+    if (bit == '0') {
+      root = root -> left;
+      continue;
+    }
+    root = root -> right;
+  }
+  char elem = root -> ch;
+  return elem;
+}
+
+void huffman_helper(Node * root,
+  const std::string & code,
+    const std::vector < int > & positions, std::string & result_placeholder) {
+
+  char elem = find_char_from_code(root, code);
+  for (auto p: positions) {
+    result_placeholder[p] = elem;
+  }
+}
+
+void * pthread_call_helper(void * args) {
+  Pthread_args * a = static_cast < Pthread_args * > (args);
+  huffman_helper(a -> root, a -> code, a -> positions, a -> placeholder);
+}
+
+void multithread_solve(Node * root,
+  const std::vector < std::pair < std::string, std::vector < int >>> & data, std::string & placeholder) {
+  std::vector < pthread_t > threads(data.size());
+
+  std::vector < Pthread_args > args;
+  for (int i = 0; i < data.size(); ++i) {
+    Pthread_args arg(root, data[i].first, data[i].second, placeholder);
+    args.push_back(arg);
+  }
+
+  for (int i = 0; i < data.size(); ++i) {
+    pthread_create( & threads[i], nullptr, & pthread_call_helper, static_cast < void * > ( & args[i]));
+  }
+
+  ///join the threads and exit
+  for (int i = 0; i < threads.size(); ++i) {
+    pthread_join(threads[i], nullptr);
+  }
+}
+
+int main() {
+  std::string filename;
+  std::cin >> filename;
+
+  std::ifstream fin(filename);
+  char ch;
+  int freq;
+  int total_count = 0;
+
+  std::vector < std::pair < char, int >> freqs;
+  std::unordered_map < int, char > freq2char;
+  std::unordered_map < char, int > char2freq;
+
+  std::string line;
+  while (std::getline(fin, line)) {
+    char ch = line[0];
+    int freq = std::stoi(line.substr(2));
+    freqs.emplace_back(ch, freq);
+    freq2char[freq] = ch;
+    char2freq[ch] = freq;
+    total_count += freq;
+  }
+
+  Node * root = create_tree(freqs);
+
+  auto codes = extract_codes(root);
+
+  for (auto & c: codes) {
+    std::cout << "Symbol: " << c.second << ", Frequency: " << char2freq[c.second] << ", Code: " << c.first << std::endl;
+  }
+
+  std::string res(total_count, ' ');
+
+  std::string compressed_file;
+  std::cin >> compressed_file;
+
+  std::ifstream comp(compressed_file);
+
+  std::vector < std::pair < std::string, std::vector < int >>> comp_data;
+  for (int i = 0; i < freqs.size(); ++i) {
+    std::string code;
+    comp >> code;
+    char c = find_char_from_code(root, code);
+    std::vector < int > positions;
+    for (int j = 0; j < char2freq[c]; ++j) {
+      int x;
+      comp >> x;
+      positions.push_back(x);
+    }
+
+    comp_data.emplace_back(code, positions);
+  }
+
+  multithread_solve(root, comp_data, res);
+
+  std::cout << "Original message: " << res << std::endl;
+  return 0;
+
+}

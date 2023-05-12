@@ -1,0 +1,173 @@
+// Include header files for required libraries
+#include <sstream> // for string stream operations
+#include <iostream> // for input/output operations
+#include <pthread.h> // for POSIX thread (pthread) functions
+#include <string> // for string operations
+#include <vector> // for vector data structure
+#include <arpa/inet.h> // for internet operations
+#include <sys/socket.h> // for socket system calls
+#include <unistd.h> // for standard symbolic constants and types
+#include <string.h> // for string manipulation functions
+#include <netdb.h> // for definitions for network operations
+ // Define a struct called Pthread_args with parameters for passing to a pthread function
+struct Pthread_args {
+  // Define constructor for initializing the struct members
+  Pthread_args(std::string h, int p, std::string c, std::vector < int > pos, std::vector < std::string > & place): host(h), port(p), code(c), positions(pos), v(place) {}
+  // Declare a string variable to store the host address
+  std::string host;
+  // Declare an integer variable to store the port number
+  int port;
+  // Declare a string variable to store the Huffman code
+  std::string code;
+  // Declare a vector of integers to store the positions of the Huffman code
+  std::vector < int > positions;
+  // Declare a reference to a vector of strings to store the decoded message
+  std::vector < std::string > & v;
+};
+// This function is a helper function to be called by the pthread_create function
+// It takes a void pointer as input which is cast to a Pthread_args struct pointer
+// The function returns a void pointer to satisfy the pthread_create signature
+void * pthread_call_helper(void * args) {
+  // Cast the void pointer to Pthread_args pointer
+  Pthread_args * a = static_cast < Pthread_args * > (args);
+
+  // Declare sockfd and n variables for socket and read/write operations
+  int sockfd, n;
+
+  // Declare struct variables for socket operations
+  struct sockaddr_in serv_addr;
+  struct hostent * server;
+
+  // Create a new socket
+  sockfd = socket(AF_INET, SOCK_STREAM, 0);
+  if (sockfd < 0)
+    std::cerr << "ERROR opening socket";
+
+  // Get host by name
+  server = gethostbyname(a -> host.c_str());
+  if (server == NULL) {
+    std::cerr << "ERROR, no such host\n";
+    exit(0);
+  }
+
+  // Clear and set serv_addr struct
+  bzero((char * ) & serv_addr, sizeof(serv_addr));
+  serv_addr.sin_family = AF_INET;
+  bcopy((char * ) server -> h_addr,
+    (char * ) & serv_addr.sin_addr.s_addr, server -> h_length);
+  serv_addr.sin_port = htons(a -> port);
+
+  // Connect to the server
+  if (connect(sockfd, (struct sockaddr * ) & serv_addr, sizeof(serv_addr)) < 0) {
+    std::cerr << "ERROR connecting";
+    exit(1);
+  }
+
+  // Write the length of the message to the socket
+  int sMessage = strlen(a -> code.c_str());
+  n = write(sockfd, & sMessage, sizeof(int));
+  if (n < 0) {
+    std::cerr << "ERROR writing to socket";
+    exit(1);
+  }
+
+  // Write the message to the socket
+  n = write(sockfd, a -> code.c_str(), sMessage);
+  if (n < 0) {
+    std::cerr << "ERROR writing to socket";
+    exit(1);
+  }
+
+  // Read the size of the response message from the socket
+  int size;
+  n = read(sockfd, & size, sizeof(int));
+  if (n < 0) {
+    std::cerr << "ERROR reading from socket";
+    exit(1);
+  }
+
+  // Allocate memory for the response message and read it from the socket
+  char * buffer = new char[size + 1];
+  bzero(buffer, size + 1);
+  n = read(sockfd, buffer, size);
+  std::string value(buffer);
+  delete[] buffer;
+
+  // Close the socket
+  close(sockfd);
+
+  // Update the positions in the vector with the response message value
+  for (int i: a -> positions) {
+    a -> v[i] = value;
+  }
+
+  // Return null pointer
+  return nullptr;
+}
+
+void multithread_solve(std::string host, int port,
+  const std::vector < std::pair < std::string, std::vector < int >>> & data, std::vector < std::string > & v) {
+  std::vector < pthread_t > threads(data.size()); // vector to store thread ids
+
+  std::vector < Pthread_args > args; // vector to store Pthread_args structs
+  for (int i = 0; i < data.size(); ++i) { // loop over data vector
+    Pthread_args arg(host, port, data[i].first, data[i].second, v); // create Pthread_args struct with current data pair
+    args.push_back(arg); // add Pthread_args struct to vector
+  }
+
+  for (int i = 0; i < data.size(); ++i) { // loop over data vector
+    pthread_create( & threads[i], nullptr, & pthread_call_helper, static_cast < void * > ( & args[i])); // create new thread and pass in corresponding Pthread_args struct
+  }
+
+  // join the threads and exit
+  for (int i = 0; i < threads.size(); ++i) { // loop over threads vector
+    pthread_join(threads[i], nullptr); // join the current thread
+  }
+}
+
+// main function which takes command line arguments
+int main(int argc, char * argv[]) {
+
+  // check if command line arguments are valid
+  if (argc <= 2) {
+    std::cout << "Invalid command line arguments" << std::endl;
+    return 0;
+  }
+
+  // assign the values of host and port from the command line arguments
+  std::string host(argv[1]);
+  int port = atoi(argv[2]);
+
+  // read the input data from stdin and parse it into vector of pair of code and positions
+  std::string line;
+  std::vector < std::pair < std::string, std::vector < int >>> comp_data;
+  int sz = -1;
+  while (std::getline(std::cin, line)) {
+    std::stringstream ss(line);
+    std::string code, tmp;
+    ss >> code;
+    std::vector < int > positions;
+    while (ss >> tmp) {
+      int pos = stoi(tmp);
+      sz = std::max(sz, pos);
+      positions.push_back(pos);
+    }
+    comp_data.emplace_back(code, positions);
+  }
+
+  // initialize a vector of strings to store the results
+  std::vector<std::string> res(sz+1);
+
+  // call the multithreaded function to solve the problem and store the results in the vector
+  multithread_solve(host, port, comp_data, res);
+
+  // print the original message
+  std::cout << "Original message: ";
+  for (std::string s: res) {
+    std::cout << s;
+  }
+  std::cout << std::endl;
+
+  // return success
+  return 0;
+}
